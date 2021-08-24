@@ -31,6 +31,7 @@ class ModelGenerate extends BaseCommand
      *
      * @Argument(name="namespace", type=ArgType::STRING, required=true, comments="生成的Model所在命名空间")
      * @Argument(name="baseClass", type=ArgType::STRING, default="Imi\Pgsql\Model\PgModel", comments="生成的Model所继承的基类,默认\Imi\Model\Model,可选")
+     *
      * @Option(name="database", type=ArgType::STRING, comments="数据库名，不传则取连接池默认配置的库名")
      * @Option(name="poolName", type=ArgType::STRING, comments="连接池名称，不传则取默认连接池")
      * @Option(name="prefix", type=ArgType::ARRAY, default={}, comments="传值则去除该表前缀，以半角逗号分隔多个前缀")
@@ -41,12 +42,20 @@ class ModelGenerate extends BaseCommand
      * @Option(name="basePath", type=ArgType::STRING, default=null, comments="指定命名空间对应的基准路径，可选")
      * @Option(name="entity", type=ArgType::BOOLEAN, default=true, comments="序列化时是否使用驼峰命名(true or false),默认true,可选")
      * @Option(name="lengthCheck", type=ArgType::BOOLEAN, default=false, comments="是否检查字符串字段长度,可选")
+     * @Option(name="bean", type=ArgType::BOOL, comments="模型对象是否作为 bean 类使用", default=true)
+     * @Option(name="incrUpdate", type=ArgType::BOOL, comments="模型是否启用增量更新", default=false)
      *
      * @param string|bool $override
      * @param string|bool $config
      */
-    public function generate(string $namespace, string $baseClass, ?string $database, ?string $poolName, array $prefix, array $include, array $exclude, $override, $config, ?string $basePath, bool $entity, bool $lengthCheck): void
+    public function generate(string $namespace, string $baseClass, ?string $database, ?string $poolName, array $prefix, array $include, array $exclude, $override, $config, ?string $basePath, bool $entity, bool $lengthCheck, bool $bean, bool $incrUpdate): void
     {
+        $db = Db::getInstance($poolName);
+        $tablePrefix = $db->getOption()['prefix'] ?? '';
+        if ('' !== $tablePrefix && !\in_array($tablePrefix, $prefix))
+        {
+            $prefix[] = $tablePrefix;
+        }
         $override = (string) $override;
         switch ($override)
         {
@@ -153,9 +162,10 @@ class ModelGenerate extends BaseCommand
                 $hasResult = false;
                 $fileName = '';
                 $modelNamespace = '';
+                $tableConfig = null;
                 foreach ($configData['namespace'] ?? [] as $namespaceName => $namespaceItem)
                 {
-                    if (\in_array($table, $namespaceItem['tables'] ?? []))
+                    if (($tableConfig = ($namespaceItem['tables'][$table] ?? null)) || \in_array($table, $namespaceItem['tables'] ?? []))
                     {
                         $modelNamespace = $namespaceName;
                         $path = Imi::getNamespacePath($modelNamespace, true);
@@ -185,7 +195,15 @@ class ModelGenerate extends BaseCommand
                 $this->output->writeln('Skip <info>' . $table . '</info>');
                 continue;
             }
-            $tableComment = Text::isEmpty($item['comment']) ? $table : $item['comment'];
+            if ($usePrefix = ('' !== $tablePrefix && str_starts_with($table, $tablePrefix)))
+            {
+                $tableName = Text::ltrimText($table, $tablePrefix);
+            }
+            else
+            {
+                $tableName = $table;
+            }
+            $tableComment = Text::isEmpty($item['comment']) ? $tableName : $item['comment'];
             if ('@' === ($tableComment[0] ?? ''))
             {
                 $tableComment = '@' . $tableComment;
@@ -195,11 +213,14 @@ class ModelGenerate extends BaseCommand
                 'baseClassName' => $baseClass,
                 'className'     => $className,
                 'table'         => [
-                    'name'  => $table,
-                    'id'    => [],
+                    'name'      => $tableName,
+                    'id'        => [],
+                    'usePrefix' => $usePrefix,
                 ],
                 'fields'        => [],
                 'entity'        => $entity,
+                'bean'          => $tableConfig['bean'] ?? $bean,
+                'incrUpdate'    => $tableConfig['incrUpdate'] ?? $incrUpdate,
                 'poolName'      => $poolName,
                 'tableComment'  => $tableComment,
                 'lengthCheck'   => $lengthCheck,
@@ -271,13 +292,22 @@ class ModelGenerate extends BaseCommand
      */
     private function parseFields(?string $poolName, array $fields, ?array &$data, bool $isView, string $table, ?array $config): void
     {
-        $idCount = 0;
-        foreach ($fields as $i => $field)
+        foreach ($fields as $field)
         {
-            if ($field['atttypmod'] > -1)
+            $atttypmod = $field['atttypmod'];
+            if ($atttypmod > -1)
             {
-                $length = (($field['atttypmod'] - 4) >> 16) & 65535;
-                $accuracy = ($field['atttypmod'] - 4) & 65535;
+                if (-1 === $field['attlen'])
+                {
+                    $atttypmod -= 4;
+                }
+                $length = ($atttypmod >> 16) & 65535;
+                $accuracy = $atttypmod & 65535;
+                if (0 === $length)
+                {
+                    $length = $accuracy;
+                    $accuracy = 0;
+                }
             }
             else
             {
@@ -287,10 +317,6 @@ class ModelGenerate extends BaseCommand
 
             $isPk = $field['ordinal_position'] > 0;
             [$phpType, $phpDefinitionType] = $this->dbFieldTypeToPhp($field);
-            if (!empty($phpDefinitionType))
-            {
-                $phpDefinitionType = '?' . $phpDefinitionType;
-            }
             $data['fields'][] = [
                 'name'              => $field['attname'],
                 'varName'           => Text::toCamelName($field['attname']),
@@ -304,18 +330,20 @@ class ModelGenerate extends BaseCommand
                 'default'           => $field['adsrc'],
                 'defaultValue'      => $this->parseFieldDefaultValue($poolName, $type, $field['adsrc']),
                 'isPrimaryKey'      => $isPk,
-                'primaryKeyIndex'   => $field['ordinal_position'] ?? -1,
+                'primaryKeyIndex'   => $primaryKeyIndex = ($field['ordinal_position'] ?? 0) - 1,
                 'isAutoIncrement'   => '' !== $field['attidentity'],
                 'comment'           => $field['description'] ?? '',
                 'typeDefinition'    => $config['relation'][$table]['fields'][$field['attname']]['typeDefinition'] ?? true,
                 'ref'               => \in_array($type, ['json', 'jsonb']),
+                'virtual'           => 's' === $field['attgenerated'],
             ];
             if ($isPk)
             {
-                $data['table']['id'][] = $field['attname'];
-                ++$idCount;
+                $data['table']['id'][$primaryKeyIndex] = $field['attname'];
             }
         }
+        ksort($data['table']['id']);
+        $data['table']['id'] = array_values($data['table']['id']);
     }
 
     /**
@@ -329,6 +357,30 @@ class ModelGenerate extends BaseCommand
 
         return ob_get_clean();
     }
+
+    public const DB_FIELD_TYPE_MAP = [
+        'int'         => ['int', '?int'],
+        'int2'        => ['int', '?int'],
+        'int4'        => ['int', '?int'],
+        'int8'        => ['int', '?int'],
+        'integer'     => ['int', '?int'],
+        'smallint'    => ['int', '?int'],
+        'bigint'      => ['int', '?int'],
+        'smallserial' => ['int', '?int'],
+        'serial'      => ['int', '?int'],
+        'bigserial'   => ['int', '?int'],
+        'serial2'     => ['int', '?int'],
+        'serial4'     => ['int', '?int'],
+        'serial8'     => ['int', '?int'],
+        'bool'        => ['bool', '?bool'],
+        'boolean'     => ['bool', '?bool'],
+        'double'      => ['float', '?float'],
+        'float4'      => ['float', '?float'],
+        'float8'      => ['float', '?float'],
+        'numeric'     => ['string|float|int', \PHP_VERSION_ID >= 80000 ? 'string|float|int|null' : '', ''],
+        'json'        => ['\\' . \Imi\Util\LazyArrayObject::class . '|array', ''],
+        'jsonb'       => ['\\' . \Imi\Util\LazyArrayObject::class . '|array', ''],
+    ];
 
     /**
      * 数据库字段类型转PHP的字段类型.
@@ -346,34 +398,12 @@ class ModelGenerate extends BaseCommand
         {
             $type = $field['typname'];
         }
-        static $map = [
-            'int'         => ['int', 'int'],
-            'int2'        => ['int', 'int'],
-            'int4'        => ['int', 'int'],
-            'int8'        => ['int', 'int'],
-            'integer'     => ['int', 'int'],
-            'smallint'    => ['int', 'int'],
-            'bigint'      => ['int', 'int'],
-            'smallserial' => ['int', 'int'],
-            'serial'      => ['int', 'int'],
-            'bigserial'   => ['int', 'int'],
-            'serial2'     => ['int', 'int'],
-            'serial4'     => ['int', 'int'],
-            'serial8'     => ['int', 'int'],
-            'bool'        => ['bool', 'bool'],
-            'boolean'     => ['bool', 'bool'],
-            'double'      => ['float', 'float'],
-            'float4'      => ['float', 'float'],
-            'float8'      => ['float', 'float'],
-            'json'        => ['\\' . \Imi\Util\LazyArrayObject::class . '|array', ''],
-            'jsonb'       => ['\\' . \Imi\Util\LazyArrayObject::class . '|array', ''],
-        ];
 
-        $result = $map[$type] ?? ['string', 'string'];
+        $result = self::DB_FIELD_TYPE_MAP[$type] ?? ['string', '?string'];
         if ($isArray)
         {
-            $result[0] .= '[]';
-            $result[1] = 'array';
+            $result[0] .= 'array';
+            $result[1] = '?array';
         }
 
         return $result;

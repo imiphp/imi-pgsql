@@ -19,6 +19,7 @@ abstract class BaseBuilder extends \Imi\Db\Query\Builder\BaseBuilder
         }
         $result = [];
         $query = $this->query;
+        $params = &$this->params;
         foreach ($fields as $k => $v)
         {
             if (\is_int($k))
@@ -38,6 +39,11 @@ abstract class BaseBuilder extends \Imi\Db\Query\Builder\BaseBuilder
                 $field = new Field(null, null, $k, $v);
             }
             $result[] = $field->toString($query);
+            $binds = $field->getBinds();
+            if ($binds)
+            {
+                $params = array_merge($params, $binds);
+            }
         }
 
         return implode(',', $result);
@@ -54,11 +60,20 @@ abstract class BaseBuilder extends \Imi\Db\Query\Builder\BaseBuilder
         }
         elseif (null === $offset)
         {
-            return ' limit ' . ((int) $limit);
+            $sql = ' limit ' . ($limitName = $this->query->getAutoParamName());
+
+            $this->params[$limitName] = (int) $limit;
+
+            return $sql;
         }
         else
         {
-            return ' limit ' . ((int) $limit) . ' offset ' . ((int) $offset);
+            $sql = ' limit ' . ($limitName = $this->query->getAutoParamName()) . ' offset ' . ($offsetName = $this->query->getAutoParamName());
+
+            $this->params[$offsetName] = (int) $offset;
+            $this->params[$limitName] = (int) $limit;
+
+            return $sql;
         }
     }
 }

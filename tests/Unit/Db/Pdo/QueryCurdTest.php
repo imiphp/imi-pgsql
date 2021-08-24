@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Imi\Pgsql\Test\Unit\Db\Pdo;
 
+use Imi\Pgsql\Test\TPdoPgTest;
 use Imi\Pgsql\Test\Unit\Db\QueryCurdBaseTest;
 
 /**
@@ -11,19 +12,21 @@ use Imi\Pgsql\Test\Unit\Db\QueryCurdBaseTest;
  */
 class QueryCurdTest extends QueryCurdBaseTest
 {
+    use TPdoPgTest;
+
     /**
      * 连接池名.
      *
      * @var string
      */
-    protected $poolName = 'maindb';
+    protected ?string $poolName = 'maindb';
 
     /**
      * 测试 whereEx 的 SQL.
      *
      * @var string
      */
-    protected $expectedTestWhereExSql = 'select * from "tb_article" where ("id" = :p1 and ("id" in (:p2) ) )';
+    protected $expectedTestWhereExSql = 'select * from "tb_article" where ("id" = :p1 and ("id" in (:p2)))';
 
     /**
      * 测试 JSON 查询的 SQL.

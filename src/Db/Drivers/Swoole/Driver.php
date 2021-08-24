@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Imi\Pgsql\Db\Drivers\Swoole;
 
-use Imi\App;
 use Imi\Bean\Annotation\Bean;
+use Imi\Bean\BeanFactory;
 use Imi\Config;
 use Imi\Db\Exception\DbException;
 use Imi\Db\Statement\StatementManager;
@@ -49,7 +49,7 @@ if (class_exists(PostgreSQL::class, false))
         /**
          * 事务管理.
          */
-        protected Transaction $transaction;
+        protected ?Transaction $transaction = null;
 
         /**
          * 自增.
@@ -73,7 +73,6 @@ if (class_exists(PostgreSQL::class, false))
         {
             parent::__construct($option);
             $this->isCacheStatement = Config::get('@app.db.statement.cache', true);
-            $this->transaction = new Transaction();
         }
 
         /**
@@ -128,7 +127,7 @@ if (class_exists(PostgreSQL::class, false))
                     . ' user=' . ($option['username'] ?? '')
                     . ' password=' . ($option['password'] ?? '')
                     . $otherOptionsContent
-                    ;
+            ;
         }
 
         /**
@@ -164,7 +163,10 @@ if (class_exists(PostgreSQL::class, false))
             {
                 $this->instance = null;
             }
-            $this->transaction->init();
+            if ($this->transaction)
+            {
+                $this->transaction->init();
+            }
         }
 
         /**
@@ -190,7 +192,7 @@ if (class_exists(PostgreSQL::class, false))
                 return false;
             }
             $this->exec('SAVEPOINT P' . $this->getTransactionLevels());
-            $this->transaction->beginTransaction();
+            $this->getTransaction()->beginTransaction();
 
             return true;
         }
@@ -210,7 +212,7 @@ if (class_exists(PostgreSQL::class, false))
                 return false;
             }
 
-            return $this->transaction->commit();
+            return $this->getTransaction()->commit();
         }
 
         /**
@@ -218,18 +220,18 @@ if (class_exists(PostgreSQL::class, false))
          */
         public function rollBack(?int $levels = null): bool
         {
-            if (null === $levels)
+            if (null === $levels || ($toLevel = $this->getTransactionLevels() - $levels) <= 0)
             {
                 $result = $this->instance->query('rollback');
             }
             else
             {
-                $this->exec('ROLLBACK TO P' . ($this->getTransactionLevels()));
+                $this->exec('ROLLBACK TO P' . $toLevel);
                 $result = true;
             }
             if ($result)
             {
-                $this->transaction->rollBack($levels);
+                $this->getTransaction()->rollBack($levels);
             }
             elseif ($this->checkCodeIsOffline($this->errorCode()))
             {
@@ -244,7 +246,7 @@ if (class_exists(PostgreSQL::class, false))
          */
         public function getTransactionLevels(): int
         {
-            return $this->transaction->getTransactionLevels();
+            return $this->getTransaction()->getTransactionLevels();
         }
 
         /**
@@ -252,7 +254,7 @@ if (class_exists(PostgreSQL::class, false))
          */
         public function inTransaction(): bool
         {
-            return $this->transaction->getTransactionLevels() > 0;
+            return $this->getTransaction()->getTransactionLevels() > 0;
         }
 
         /**
@@ -350,16 +352,52 @@ if (class_exists(PostgreSQL::class, false))
          */
         public function lastInsertId(?string $name = null): string
         {
+            $instance = $this->instance;
             if (null === $name)
             {
-                return (string) $this->query('select LASTVAL()')->fetchColumn();
+                $queryResult = $instance->query($sql = 'select LASTVAL()');
+                if (false === $queryResult)
+                {
+                    $errorCode = $this->errorCode();
+                    $errorInfo = $this->errorInfo();
+                    if ($this->checkCodeIsOffline($errorCode))
+                    {
+                        $this->close();
+                    }
+                    throw new DbException('SQL query error: [' . $errorCode . '] ' . $errorInfo . \PHP_EOL . 'sql: ' . $sql . \PHP_EOL);
+                }
+                $row = $instance->fetchRow($queryResult, 0);
+
+                return (string) reset($row);
             }
             else
             {
-                $stmt = $this->prepare('SELECT CURRVAL($1)');
-                $stmt->execute([$name]);
+                $statementName = 'imi_stmt_' . (++$this->statementIncr);
+                $queryResult = $instance->prepare($statementName, $sql = 'SELECT CURRVAL($1)');
+                if (false === $queryResult)
+                {
+                    $errorCode = $this->errorCode();
+                    $errorInfo = $this->errorInfo();
+                    if ($this->checkCodeIsOffline($errorCode))
+                    {
+                        $this->close();
+                    }
+                    throw new DbException('SQL prepare error [' . $errorCode . '] ' . $errorInfo . \PHP_EOL . 'sql: ' . $sql . \PHP_EOL);
+                }
+                $queryResult = $instance->execute($statementName, [$name]);
+                if (false === $queryResult)
+                {
+                    $errorCode = $this->errorCode();
+                    $errorInfo = $this->errorInfo();
+                    if ($this->checkCodeIsOffline($errorCode))
+                    {
+                        $this->close();
+                    }
+                    throw new DbException('SQL query error: [' . $errorCode . '] ' . $errorInfo . \PHP_EOL . 'sql: ' . $sql . \PHP_EOL);
+                }
+                $row = $instance->fetchRow($queryResult, 0);
 
-                return (string) $stmt->fetchColumn();
+                return (string) reset($row);
             }
         }
 
@@ -396,7 +434,7 @@ if (class_exists(PostgreSQL::class, false))
                     }
                     throw new DbException('SQL prepare error [' . $errorCode . '] ' . $errorInfo . \PHP_EOL . 'sql: ' . $sql . \PHP_EOL);
                 }
-                $stmt = App::getBean(Statement::class, $this, null, $sql, $statementName, $sqlParamsMap);
+                $stmt = BeanFactory::newInstance(Statement::class, $this, null, $sql, $statementName, $sqlParamsMap);
                 if ($this->isCacheStatement && !isset($stmtCache))
                 {
                     StatementManager::setNX($stmt, true);
@@ -424,7 +462,7 @@ if (class_exists(PostgreSQL::class, false))
                 throw new DbException('SQL query error: [' . $errorCode . '] ' . $errorInfo . \PHP_EOL . 'sql: ' . $sql . \PHP_EOL);
             }
 
-            return App::getBean(Statement::class, $this, $queryResult, $sql);
+            return BeanFactory::newInstance(Statement::class, $this, $queryResult, $sql);
         }
 
         /**
@@ -432,7 +470,7 @@ if (class_exists(PostgreSQL::class, false))
          */
         public function getTransaction(): Transaction
         {
-            return $this->transaction;
+            return $this->transaction ??= new Transaction();
         }
     }
 }

@@ -22,14 +22,9 @@ class Statement extends PgsqlBaseStatement implements IPgsqlStatement
     protected $queryResult;
 
     /**
-     * 数据.
-     */
-    protected array $data = [];
-
-    /**
      * 数据库操作对象
      */
-    protected IPgsqlDb $db;
+    protected ?IPgsqlDb $db = null;
 
     /**
      * 绑定数据.
@@ -128,7 +123,7 @@ class Statement extends PgsqlBaseStatement implements IPgsqlStatement
         {
             --$parameter;
         }
-        $this->bindValues[$parameter] = $value;
+        $this->bindValues[$parameter] = $this->parseValue($value);
 
         return true;
     }
@@ -204,21 +199,24 @@ class Statement extends PgsqlBaseStatement implements IPgsqlStatement
                     {
                         if (isset($inputParameters[$paramName]))
                         {
-                            $bindValues[$index] = $inputParameters[$paramName];
+                            $bindValues[$index] = $this->parseValue($inputParameters[$paramName]);
                         }
                         elseif (isset($inputParameters[$key = ':' . $paramName]))
                         {
-                            $bindValues[$index] = $inputParameters[$key];
+                            $bindValues[$index] = $this->parseValue($inputParameters[$key]);
                         }
                         elseif (isset($inputParameters[$index]))
                         {
-                            $bindValues[$index] = $inputParameters[$index];
+                            $bindValues[$index] = $this->parseValue($inputParameters[$index]);
                         }
                     }
                 }
                 else
                 {
-                    $bindValues = array_values($inputParameters);
+                    foreach ($inputParameters as $value)
+                    {
+                        $bindValues[] = $this->parseValue($value);
+                    }
                 }
             }
             $this->queryResult = $queryResult = $pgDb->execute($this->statementName, $bindValues);
@@ -301,7 +299,7 @@ class Statement extends PgsqlBaseStatement implements IPgsqlStatement
         $result = new $className();
         foreach ($row as $k => $v)
         {
-            $result->$k = $v;
+            $result->{$k} = $v;
         }
 
         return $result;
@@ -336,7 +334,14 @@ class Statement extends PgsqlBaseStatement implements IPgsqlStatement
      */
     public function lastInsertId(?string $name = null): string
     {
-        return $this->lastInsertId;
+        if (null === $name)
+        {
+            return $this->lastInsertId;
+        }
+        else
+        {
+            return $this->db->lastInsertId($name);
+        }
     }
 
     /**
@@ -398,6 +403,21 @@ class Statement extends PgsqlBaseStatement implements IPgsqlStatement
     }
 
     /**
+     * @param mixed $value
+     *
+     * @return mixed
+     */
+    protected function parseValue($value)
+    {
+        if (\is_bool($value))
+        {
+            return (int) $value;
+        }
+
+        return $value;
+    }
+
+    /**
      * 更新最后插入ID.
      */
     private function updateLastInsertId(): void
@@ -405,7 +425,17 @@ class Statement extends PgsqlBaseStatement implements IPgsqlStatement
         $queryString = $this->lastSql;
         if (Text::startwith($queryString, 'insert ', false) || Text::startwith($queryString, 'replace ', false))
         {
-            $this->lastInsertId = $this->db->lastInsertId();
+            try
+            {
+                $this->lastInsertId = $this->db->lastInsertId();
+            }
+            catch (\Throwable $th)
+            {
+                if (!str_contains($th->getMessage(), 'lastval is not yet defined in this session'))
+                {
+                    throw $th;
+                }
+            }
         }
         else
         {

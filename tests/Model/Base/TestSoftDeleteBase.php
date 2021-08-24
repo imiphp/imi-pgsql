@@ -13,8 +13,9 @@ use Imi\Pgsql\Model\PgModel as Model;
 /**
  * tb_test_soft_delete 基类.
  *
- * @Entity
- * @Table(name=@ConfigValue(name="@app.models.Imi\Pgsql\Test\Model\TestSoftDelete.name", default="tb_test_soft_delete"), id={"id"}, dbPoolName=@ConfigValue(name="@app.models.Imi\Pgsql\Test\Model\TestSoftDelete.poolName"))
+ * @Entity(camel=true, bean=true, incrUpdate=false)
+ *
+ * @Table(name=@ConfigValue(name="@app.models.Imi\Pgsql\Test\Model\TestSoftDelete.name", default="tb_test_soft_delete"), usePrefix=false, id={"id"}, dbPoolName=@ConfigValue(name="@app.models.Imi\Pgsql\Test\Model\TestSoftDelete.poolName"))
  *
  * @property int|null    $id
  * @property string|null $title
@@ -23,10 +24,19 @@ use Imi\Pgsql\Model\PgModel as Model;
 abstract class TestSoftDeleteBase extends Model
 {
     /**
-     * id.
+     * {@inheritdoc}
+     */
+    public const PRIMARY_KEY = 'id';
 
+    /**
+     * {@inheritdoc}
+     */
+    public const PRIMARY_KEYS = ['id'];
+
+    /**
+     * id.
      *
-     * @Column(name="id", type="int4", length=-1, accuracy=0, nullable=false, default="", isPrimaryKey=true, primaryKeyIndex=1, isAutoIncrement=true, ndims=0)
+     * @Column(name="id", type="int4", length=-1, accuracy=0, nullable=false, default="", isPrimaryKey=true, primaryKeyIndex=0, isAutoIncrement=true, ndims=0, virtual=false)
      */
     protected ?int $id = null;
 
@@ -54,9 +64,8 @@ abstract class TestSoftDeleteBase extends Model
 
     /**
      * title.
-
      *
-     * @Column(name="title", type="varchar", length=0, accuracy=255, nullable=false, default="", isPrimaryKey=false, primaryKeyIndex=-1, isAutoIncrement=false, ndims=0)
+     * @Column(name="title", type="varchar", length=255, accuracy=0, nullable=false, default="", isPrimaryKey=false, primaryKeyIndex=-1, isAutoIncrement=false, ndims=0, virtual=false)
      */
     protected ?string $title = null;
 
@@ -77,6 +86,10 @@ abstract class TestSoftDeleteBase extends Model
      */
     public function setTitle(?string $title)
     {
+        if (\is_string($title) && mb_strlen($title) > 255)
+        {
+            throw new \InvalidArgumentException('The maximum length of $title is 255');
+        }
         $this->title = $title;
 
         return $this;
@@ -84,9 +97,8 @@ abstract class TestSoftDeleteBase extends Model
 
     /**
      * delete_time.
-
      *
-     * @Column(name="delete_time", type="int4", length=-1, accuracy=0, nullable=false, default="0", isPrimaryKey=false, primaryKeyIndex=-1, isAutoIncrement=false, ndims=0)
+     * @Column(name="delete_time", type="int4", length=-1, accuracy=0, nullable=false, default="0", isPrimaryKey=false, primaryKeyIndex=-1, isAutoIncrement=false, ndims=0, virtual=false)
      */
     protected ?int $deleteTime = 0;
 

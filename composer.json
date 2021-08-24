@@ -1,13 +1,11 @@
 {
     "name": "imiphp/imi-pgsql",
     "type": "library",
-    "license": "MIT",
+    "license": "MulanPSL-2.0",
     "description": "imi 框架配套的 pgsql 组件",
-    "require": {
-        "php": ">=7.4 <8.2"
-    },
+    "require": {},
     "require-dev": {
-        "swoole/ide-helper": "^4.7"
+        "swoole/ide-helper": "~4.8"
     },
     "autoload": {
         "psr-4": {
@@ -29,5 +27,7 @@
         "pre-update-cmd": "Imi\\Pgsql\\Dev\\Dev::preUpdate",
         "post-install-cmd": "Imi\\Pgsql\\Dev\\Dev::postUpdate",
         "post-update-cmd": "Imi\\Pgsql\\Dev\\Dev::postUpdate"
-    }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }

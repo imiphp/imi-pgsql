@@ -14,12 +14,14 @@ use Imi\Pgsql\Test\Model\Base\MemberBase;
  * Member.
  *
  * @Inherit
+ *
  * @Serializables(mode="deny", fields={"password"})
  */
 class MemberWithSqlField extends MemberBase
 {
     /**
      * @Column(name="a", virtual=true)
+     *
      * @Sql("1+1")
      *
      * @var int
@@ -28,6 +30,7 @@ class MemberWithSqlField extends MemberBase
 
     /**
      * @Column(virtual=true)
+     *
      * @Sql("2+2")
      *
      * @var int

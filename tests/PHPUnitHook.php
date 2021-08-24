@@ -10,20 +10,22 @@ use Imi\Event\Event;
 use Imi\Event\EventParam;
 use Imi\Pool\Interfaces\IPoolResource;
 use Imi\Pool\PoolManager;
+use Imi\Swoole\SwooleApp;
 use PHPUnit\Runner\BeforeFirstTestHook;
 
 class PHPUnitHook implements BeforeFirstTestHook
 {
     public function executeBeforeFirstTest(): void
     {
-        Event::on('IMI.APP_RUN', function (EventParam $param) {
+        Event::on('IMI.APP_RUN', static function (EventParam $param) {
             $param->stopPropagation();
-            PoolManager::use('maindb', function (IPoolResource $resource, IDb $db) {
+            PoolManager::use(\in_array('pgsql', pdo_drivers()) ? 'maindb' : 'swoole', static function (IPoolResource $resource, IDb $db) {
                 $truncateList = [
                     'tb_article',
                     'tb_member',
                     'tb_update_time',
                     'tb_performance',
+                    'tb_no_inc_pk',
                 ];
                 foreach ($truncateList as $table)
                 {
@@ -31,6 +33,7 @@ class PHPUnitHook implements BeforeFirstTestHook
                 }
             });
         }, 1);
-        App::run('Imi\Pgsql\Test', TestApp::class);
+        App::run('Imi\Pgsql\Test', SwooleApp::class, static function () {
+        });
     }
 }

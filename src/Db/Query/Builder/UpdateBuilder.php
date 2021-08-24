@@ -51,6 +51,11 @@ class UpdateBuilder extends BaseBuilder
                         $setStrs[] = $field . ' = ' . $v->toString($query);
                     }
                 }
+                $binds = $v->getBinds();
+                if ($binds)
+                {
+                    $params = array_merge($params, $binds);
+                }
             }
             else
             {
@@ -58,7 +63,7 @@ class UpdateBuilder extends BaseBuilder
                 $field = $query->parseKeywordToText($matches['keywords']);
                 if ($matches['jsonKeywords'])
                 {
-                    if (is_scalar($v))
+                    if (\is_scalar($v))
                     {
                         $valueParam = $query->getAutoParamName();
                         $jsonSets[$field][] = [
@@ -102,7 +107,7 @@ class UpdateBuilder extends BaseBuilder
     /**
      * @param mixed $value
      */
-    private function parseValueParam(string $valueParam, $value): string
+    protected function parseValueParam(string $valueParam, $value): string
     {
         if (\is_bool($value))
         {

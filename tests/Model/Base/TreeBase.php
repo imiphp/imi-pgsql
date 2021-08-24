@@ -13,8 +13,9 @@ use Imi\Pgsql\Model\PgModel as Model;
 /**
  * tb_tree 基类.
  *
- * @Entity
- * @Table(name=@ConfigValue(name="@app.models.Imi\Pgsql\Test\Model\Tree.name", default="tb_tree"), id={"id"}, dbPoolName=@ConfigValue(name="@app.models.Imi\Pgsql\Test\Model\Tree.poolName"))
+ * @Entity(camel=true, bean=true, incrUpdate=false)
+ *
+ * @Table(name=@ConfigValue(name="@app.models.Imi\Pgsql\Test\Model\Tree.name", default="tb_tree"), usePrefix=false, id={"id"}, dbPoolName=@ConfigValue(name="@app.models.Imi\Pgsql\Test\Model\Tree.poolName"))
  *
  * @property int|null    $id
  * @property int|null    $parentId
@@ -23,10 +24,19 @@ use Imi\Pgsql\Model\PgModel as Model;
 abstract class TreeBase extends Model
 {
     /**
-     * id.
+     * {@inheritdoc}
+     */
+    public const PRIMARY_KEY = 'id';
 
+    /**
+     * {@inheritdoc}
+     */
+    public const PRIMARY_KEYS = ['id'];
+
+    /**
+     * id.
      *
-     * @Column(name="id", type="int4", length=-1, accuracy=0, nullable=false, default="", isPrimaryKey=true, primaryKeyIndex=1, isAutoIncrement=true, ndims=0)
+     * @Column(name="id", type="int4", length=-1, accuracy=0, nullable=false, default="", isPrimaryKey=true, primaryKeyIndex=0, isAutoIncrement=true, ndims=0, virtual=false)
      */
     protected ?int $id = null;
 
@@ -54,9 +64,8 @@ abstract class TreeBase extends Model
 
     /**
      * parent_id.
-
      *
-     * @Column(name="parent_id", type="int4", length=-1, accuracy=0, nullable=false, default="", isPrimaryKey=false, primaryKeyIndex=-1, isAutoIncrement=false, ndims=0)
+     * @Column(name="parent_id", type="int4", length=-1, accuracy=0, nullable=false, default="", isPrimaryKey=false, primaryKeyIndex=-1, isAutoIncrement=false, ndims=0, virtual=false)
      */
     protected ?int $parentId = null;
 
@@ -84,9 +93,8 @@ abstract class TreeBase extends Model
 
     /**
      * name.
-
      *
-     * @Column(name="name", type="varchar", length=0, accuracy=32, nullable=false, default="", isPrimaryKey=false, primaryKeyIndex=-1, isAutoIncrement=false, ndims=0)
+     * @Column(name="name", type="varchar", length=32, accuracy=0, nullable=false, default="", isPrimaryKey=false, primaryKeyIndex=-1, isAutoIncrement=false, ndims=0, virtual=false)
      */
     protected ?string $name = null;
 
@@ -107,6 +115,10 @@ abstract class TreeBase extends Model
      */
     public function setName(?string $name)
     {
+        if (\is_string($name) && mb_strlen($name) > 32)
+        {
+            throw new \InvalidArgumentException('The maximum length of $name is 32');
+        }
         $this->name = $name;
 
         return $this;

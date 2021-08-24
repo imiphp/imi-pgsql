@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace Imi\Pgsql\Test\Unit\Model;
 
+use Imi\Pgsql\Model\PgModel;
+use Imi\Pgsql\Test\Model\Article;
 use Imi\Pgsql\Test\Model\Member;
 use Imi\Pgsql\Test\Model\MemberWithSqlField;
+use Imi\Pgsql\Test\Model\NoIncPk;
 use Imi\Pgsql\Test\Model\ReferenceGetterTestModel;
 use Imi\Pgsql\Test\Model\TestJson;
 use Imi\Pgsql\Test\Model\TestJsonNotCamel;
 use Imi\Pgsql\Test\Model\TestSoftDelete;
 use Imi\Pgsql\Test\Model\UpdateTime;
+use Imi\Pgsql\Test\Model\VirtualColumn;
 use Imi\Test\BaseTest;
 
 /**
@@ -141,6 +145,37 @@ class ModelTest extends BaseTest
         $result = $member->save();
         $this->assertTrue($result->isSuccess());
         $this->assertEquals(1, $result->getAffectedRows());
+
+        $record = NoIncPk::newInstance();
+        $record->aId = 1;
+        $record->bId = 2;
+        $record->value = 'imi';
+        $record->save();
+
+        $record2 = NoIncPk::find([
+            'a_id' => 1,
+            'b_id' => 2,
+        ]);
+        $this->assertNotNull($record2);
+        $this->assertEquals([
+            'aId'   => 1,
+            'bId'   => 2,
+            'value' => 'imi',
+        ], $record2->toArray());
+
+        $record2->value = 'yurun';
+        $record2->save();
+
+        $record3 = NoIncPk::find([
+            'a_id' => 1,
+            'b_id' => 2,
+        ]);
+        $this->assertNotNull($record3);
+        $this->assertEquals([
+            'aId'   => 1,
+            'bId'   => 2,
+            'value' => 'yurun',
+        ], $record3->toArray());
     }
 
     public function testDelete(): void
@@ -155,6 +190,12 @@ class ModelTest extends BaseTest
         $result = $member->delete();
         $this->assertTrue($result->isSuccess());
         $this->assertEquals(1, $result->getAffectedRows());
+    }
+
+    public function testExists(): void
+    {
+        $this->assertTrue(Member::exists(1));
+        $this->assertFalse(Member::exists(-1));
     }
 
     public function testFind(): void
@@ -214,6 +255,34 @@ class ModelTest extends BaseTest
                 'username'  => '1',
             ],
         ], $list);
+    }
+
+    public function testDbQueryAlias(): void
+    {
+        $list = Member::dbQuery(null, null, 'a1')
+            ->field('a1.id', 'username')
+            ->where('a1.id', '=', 1)
+            ->select()
+            ->getArray();
+        $this->assertEquals([
+            [
+                'id'        => 1,
+                'username'  => '1',
+            ],
+        ], $list);
+    }
+
+    public function testQueryAlias(): void
+    {
+        /** @var Member $member */
+        $member = Member::query(null, null, null, 'a1')
+            ->field('a1.username')
+            ->where('a1.id', '=', 1)
+            ->select()
+            ->get();
+        $this->assertEquals([
+            'username'  => '1',
+        ], $member->toArray());
     }
 
     public function testQuerySetField(): void
@@ -283,34 +352,92 @@ class ModelTest extends BaseTest
         $this->assertEquals(0, $count3);
     }
 
-    private function assertUpdateTime(UpdateTime $record, string $methodName): void
+    /**
+     * @param UpdateTime $record
+     */
+    private static function assertAutoCreateOrUpdateTime($record, array $fields, float $startMicroTime): void
     {
-        $time = time();
-        $bigintTime = (int) (microtime(true) * 1000);
-        $result = $record->$methodName();
-        $this->assertTrue($result->isSuccess());
-        $this->assertLessThanOrEqual(1, strtotime($record->date) - strtotime(date('Y-m-d', $time)), sprintf('date fail: %s', $record->date));
-        $this->assertLessThanOrEqual(1, strtotime($record->time) - strtotime(date('H:i:s', $time)), sprintf('time fail: %s', $record->time));
-        $this->assertLessThanOrEqual(1, strtotime($record->datetime) - strtotime(date('Y-m-d H:i:s', $time)), sprintf('datetime fail: %s', $record->datetime));
-        $this->assertLessThanOrEqual(1, strtotime($record->timestamp) - strtotime(date('Y-m-d H:i:s', $time)), sprintf('timestamp fail: %s', $record->timestamp));
-        $this->assertLessThanOrEqual(1, $record->int - $time, sprintf('int fail: %s', $record->int));
-        $this->assertLessThanOrEqual(1, $record->bigint - $bigintTime, sprintf('bigint fail: %s', $record->bigint));
+        /** @phpstan-ignore-next-line */
+        $parseDateTimeFun = (static fn (?string $columnType, $timeAccuracy, float $microTime) => PgModel::parseDateTime($columnType, $timeAccuracy, $microTime))->bindTo(null, PgModel::class);
+
+        foreach ($fields as $field => $opts)
+        {
+            $value = $parseDateTimeFun($opts[0], $opts[1], $startMicroTime);
+            self::assertEquals($value, $record->{$field}, sprintf('%s fail: %s', $field, $record->{$field}));
+            if (isset($opts[2]))
+            {
+                self::assertStringMatchesFormat($opts[2], $value);
+            }
+        }
     }
 
-    public function testUpdateTimeSave(): void
+    public function testAutoUpdateTime(): void
     {
-        $this->go(function () {
-            $record = UpdateTime::newInstance();
-            $this->assertUpdateTime($record, 'save');
-        }, null, 3);
-    }
+        // 不支持增量更新的模型才能完成此测试
+        self::assertFalse(UpdateTime::__getMeta()->isIncrUpdate());
 
-    public function testUpdateTimeUpdate(): void
-    {
-        $this->go(function () {
-            $record = UpdateTime::find(1);
-            $this->assertUpdateTime($record, 'update');
-        }, null, 3);
+        $fields = [
+            'date'         => ['date', true, '%d-%d-%d'],
+            'time'         => ['time', true, '%d:%d:%d.0'],
+            'timetz'       => ['timetz', true, '%d:%d:%d.0'],
+            'time2'        => ['time', 1000, '%d:%d:%d.%d'],
+            'timetz2'      => ['timetz', 1000, '%d:%d:%d.%d'],
+            'timestamp'    => ['timestamp', true, '%d-%d-%d %d:%d:%d.0'],
+            'timestamptz'  => ['timestamptz', true, '%d-%d-%d %d:%d:%d.0'],
+            'timestamp2'   => ['timestamp', 1000, '%d-%d-%d %d:%d:%d.%d'],
+            'timestamptz2' => ['timestamptz', 1000, '%d-%d-%d %d:%d:%d.%d'],
+            'int'          => ['int4', true, null],
+            'bigint'       => ['int8', true, null],
+        ];
+
+        // create 测试
+        $record = UpdateTime::newInstance();
+        $result = $record->save();
+        self::assertTrue($result->isSuccess());
+        $startMicroTime = ($record->getBigint() + 0.001) / 1000; // 为了避免浮点误差，这里加上 0.001
+        self::assertAutoCreateOrUpdateTime($record, $fields, $startMicroTime);
+
+        // update-1 测试
+        $copyArr = $record->toArray();
+        usleep(1000); // 延时 1 毫秒，避免时间相同
+        $result = $record->update();
+        self::assertTrue($result->isSuccess());
+        $startMicroTime = ($record->getBigint() + 0.001) / 1000; // 为了避免浮点误差，这里加上 0.001
+        self::assertAutoCreateOrUpdateTime($record, $fields, $startMicroTime);
+        // 更新后时间必须发生变化
+        self::assertNotEquals($copyArr, $record->toArray());
+
+        // update-2 测试
+        $copyArr = $record->toArray();
+        usleep(1000); // 延时 1 毫秒，避免时间相同
+        $result = $record->save();
+        self::assertTrue($result->isSuccess());
+        $startMicroTime = ($record->getBigint() + 0.001) / 1000; // 为了避免浮点误差，这里加上 0.001
+        self::assertAutoCreateOrUpdateTime($record, $fields, $startMicroTime);
+        // 更新后时间必须发生变化
+        self::assertNotEquals($copyArr, $record->toArray());
+
+        // 输入覆盖
+        $record = UpdateTime::newInstance();
+        $record->setDate('2000-01-01');
+        $record->setTime('01:15:30');
+        $record->setTimetz('01:15:30+08');
+        $record->setTime2('01:15:30.45');
+        $record->setTimetz2('01:15:30.45+08');
+        $record->setTimestamp('2000-01-01 01:15:30');
+        $record->setTimestamptz('2000-01-01 01:15:30+08');
+        $record->setTimestamp2('2000-01-01 01:15:30.45');
+        $record->setTimestamptz2('2000-01-01 01:15:30.45+08');
+        $record->setInt(456);
+        $record->setBigint(789);
+
+        $fixed = $record->toArray();
+        $record->save();
+        $recordArr = $record->toArray();
+
+        unset($fixed['id'], $recordArr['id']);
+
+        self::assertEquals($fixed, $recordArr);
     }
 
     public function testModelReferenceGetter(): void
@@ -465,5 +592,21 @@ class ModelTest extends BaseTest
             'json_data' => [4, 5, 6],
         ], $record->convertToArray());
         $this->assertEquals([4, 5, 6], $record->getJsonData()->toArray());
+    }
+
+    public function testModelConst(): void
+    {
+        $this->assertEquals('id', Article::PRIMARY_KEY);
+        $this->assertEquals(['id'], Article::PRIMARY_KEYS);
+    }
+
+    public function testDbVirtualColumn(): void
+    {
+        $record1 = VirtualColumn::newInstance();
+        $record1->amount = 123;
+        $record1->insert();
+
+        $record2 = VirtualColumn::find($record1->id);
+        $this->assertEquals('1.23', $record2->virtualAmount);
     }
 }

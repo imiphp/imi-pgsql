@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Imi\Pgsql\Model;
 
-use Imi\Model\Contract\IModelQuery;
 use Imi\Model\Model;
 
 /**
@@ -15,34 +14,52 @@ class PgModel extends Model
     public const DEFAULT_QUERY_CLASS = ModelQuery::class;
 
     /**
-     * {@inheritDoc}
+     * @param bool|int $timeAccuracy 推荐最大精度6位（微秒），部分系统能提供9位精度（纳秒）
+     *
+     * @return int|string|null
      */
-    public static function query(?string $poolName = null, ?int $queryType = null, string $queryClass = self::DEFAULT_QUERY_CLASS): IModelQuery
+    protected static function parseDateTime(?string $columnType, $timeAccuracy, ?float $microTime = null)
     {
-        return parent::query($poolName, $queryType, $queryClass);
-    }
+        $microTime ??= microtime(true);
 
-    /**
-     * @return mixed
-     */
-    protected static function parseDateTime(?string $columnType)
-    {
         switch ($columnType)
         {
             case 'date':
-                return date('Y-m-d');
+                return date('Y-m-d', (int) $microTime);
             case 'time':
             case 'timetz':
-                return date('H:i:s');
+                if ($timeAccuracy >= 1000)
+                {
+                    $sec = (int) $microTime;
+                    $usec = $microTime - $sec; // 获取小数部分
+
+                    return date('H:i:s.', $sec) . (int) ($usec * $timeAccuracy);
+                }
+                else
+                {
+                    return date('H:i:s');
+                }
+                // no break
             case 'timestamp':
             case 'timestamptz':
-                return date('Y-m-d H:i:s');
+                if ($timeAccuracy >= 1000)
+                {
+                    $sec = (int) $microTime;
+                    $usec = $microTime - $sec; // 获取小数部分
+
+                    return date('Y-m-d H:i:s.', $sec) . (int) ($usec * $timeAccuracy);
+                }
+                else
+                {
+                    return date('Y-m-d H:i:s');
+                }
+                // no break
             case 'int':
             case 'int2':
             case 'int4':
-                return time();
+                return (int) $microTime;
             case 'int8':
-                return (int) (microtime(true) * 1000);
+                return (int) ($microTime * (true === $timeAccuracy ? 1000 : $timeAccuracy));
             default:
                 return null;
         }

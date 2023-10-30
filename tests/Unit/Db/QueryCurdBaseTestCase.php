@@ -216,6 +216,52 @@ abstract class QueryCurdBaseTestCase extends TestCase
         ];
     }
 
+    public function testReplace(): void
+    {
+        ['id' => $id] = $this->testInsert();
+
+        $data = [
+            'id'        => $id,
+            'title'     => 'title1',
+            'content'   => 'content2',
+            'time'      => '2019-06-22 00:00:00',
+        ];
+
+        $query = Db::query($this->poolName);
+        try
+        {
+            $query->from('tb_article')->replace($data);
+            $this->assertTrue(false);
+        }
+        catch (\InvalidArgumentException $e)
+        {
+            $this->assertEquals('pgsql replace must set unique fields', $e->getMessage());
+        }
+        $query->from('tb_article')->replace($data, ['id']);
+        $record = $query->from('tb_article')->where('id', '=', $id)->select()->get();
+        Assert::assertEquals($data, $record);
+
+        $data = [
+            'id'        => $id,
+            'title'     => 'title3',
+            'content'   => 'content4',
+            'time'      => '2019-06-23 00:00:00',
+        ];
+        $query->from('tb_article')->replace($data, ['id']);
+        $record = $query->from('tb_article')->where('id', '=', $id)->select()->get();
+        Assert::assertEquals($data, $record);
+
+        try
+        {
+            $query->from('tb_article')->replace(array_values($data), ['id']);
+            $this->assertTrue(false);
+        }
+        catch (\InvalidArgumentException $e)
+        {
+            $this->assertEquals('replace() only supports key-value arrays', $e->getMessage());
+        }
+    }
+
     public function testUpdate(): void
     {
         $data = [
@@ -310,16 +356,19 @@ abstract class QueryCurdBaseTestCase extends TestCase
     {
         $query = Db::query($this->poolName);
         $jsonStr = '{"uid": "' . ($uid = uniqid('', true)) . '", "name": "aaa", "list1": [{"id": 1}]}';
+        $jsonbStr = 'null';
         // 插入数据
         $insertResult = $query->from('tb_test_json')->insert([
-            'json_data' => $jsonStr,
+            'json_data'  => $jsonStr,
+            'jsonb_data' => $jsonbStr,
         ]);
         $id = $insertResult->getLastInsertId();
         // 查询条件
         $result = $query->from('tb_test_json')->where('json_data->uid', '=', $uid)->select();
         $this->assertEquals([
-            'id'        => $id,
-            'json_data' => $jsonStr,
+            'id'         => $id,
+            'json_data'  => $jsonStr,
+            'jsonb_data' => $jsonbStr,
         ], $result->get());
         $this->assertEquals($this->expectedTestJsonSelectSql, $result->getSql());
         // 更新数据
@@ -331,8 +380,9 @@ abstract class QueryCurdBaseTestCase extends TestCase
         ]);
         $result = $query->from('tb_test_json')->where('json_data->uid', '=', $uid)->order('json_data->uid')->select();
         $this->assertEquals([
-            'id'        => $id,
-            'json_data' => '{"a": "1", "uid": "' . $uid . '", "name": "bbb", "list1": [{"id": "2"}], "list2": [1, 2, 3]}',
+            'id'         => $id,
+            'json_data'  => '{"a": "1", "uid": "' . $uid . '", "name": "bbb", "list1": [{"id": "2"}], "list2": [1, 2, 3]}',
+            'jsonb_data' => $jsonbStr,
         ], $result->get());
     }
 

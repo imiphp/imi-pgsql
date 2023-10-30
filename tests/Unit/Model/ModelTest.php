@@ -176,6 +176,22 @@ class ModelTest extends BaseTest
             'bId'   => 2,
             'value' => 'yurun',
         ], $record3->toArray());
+
+        $record4 = NoIncPk::newInstance();
+        $record4->setAId(1);
+        $record4->setBId(2);
+        $record4->setValue('yurun2');
+        $record4->save();
+        $record5 = NoIncPk::find([
+            'a_id' => 1,
+            'b_id' => 2,
+        ]);
+        $this->assertNotNull($record5);
+        $this->assertEquals([
+            'aId'   => 1,
+            'bId'   => 2,
+            'value' => 'yurun2',
+        ], $record5->toArray());
     }
 
     public function testDelete(): void
@@ -383,11 +399,13 @@ class ModelTest extends BaseTest
     {
         $record = TestJson::newInstance();
         $record->jsonData = ['a' => 1, 'b' => 2, 'c' => 3];
+        $record->jsonbData = ['a' => 11, 'b' => 22, 'c' => 33];
         $record->insert();
 
         $record2 = TestJson::find($record->id);
         $this->assertNotNull($record2);
         $this->assertEquals($record->jsonData, $record2->jsonData->toArray());
+        $this->assertEquals($record->jsonbData, $record2->jsonbData->toArray());
     }
 
     public function testSoftDelete(): void
@@ -463,33 +481,38 @@ class ModelTest extends BaseTest
     public function testNotCamel(): void
     {
         $record = TestJson::newInstance([
-            'jsonData' => '[1, 2, 3]',
+            'jsonData'  => '[1, 2, 3]',
+            'jsonbData' => 'null',
         ]);
         $this->assertEquals([
-            'id'       => null,
-            'jsonData' => [1, 2, 3],
+            'id'        => null,
+            'jsonData'  => [1, 2, 3],
+            'jsonbData' => null,
         ], $record->convertToArray());
         $this->assertEquals([1, 2, 3], $record->getJsonData()->toArray());
         $id = $record->insert()->getLastInsertId();
         $this->assertGreaterThan(0, $id);
         $record = TestJson::find($id);
         $this->assertEquals([
-            'id'       => $id,
-            'jsonData' => [1, 2, 3],
+            'id'        => $id,
+            'jsonData'  => [1, 2, 3],
+            'jsonbData' => null,
         ], $record->convertToArray());
         $this->assertEquals([1, 2, 3], $record->getJsonData()->toArray());
         $list = TestJson::query()->where('id', '=', $id)->select()->getArray();
         $this->assertEquals([[
-            'id'       => $id,
-            'jsonData' => [1, 2, 3],
+            'id'        => $id,
+            'jsonData'  => [1, 2, 3],
+            'jsonbData' => null,
         ]], TestJson::convertListToArray($list));
 
         $record = TestJsonNotCamel::newInstance([
             'json_data' => '[4, 5, 6]',
         ]);
         $this->assertEquals([
-            'id'        => null,
-            'json_data' => [4, 5, 6],
+            'id'         => null,
+            'json_data'  => [4, 5, 6],
+            'jsonb_data' => null,
         ], $record->convertToArray());
         $this->assertEquals([4, 5, 6], $record->getJsonData()->toArray());
         $id = $record->insert()->getLastInsertId();
@@ -497,21 +520,24 @@ class ModelTest extends BaseTest
 
         $record = TestJsonNotCamel::find($id);
         $this->assertEquals([
-            'id'        => $id,
-            'json_data' => [4, 5, 6],
+            'id'         => $id,
+            'json_data'  => [4, 5, 6],
+            'jsonb_data' => null,
         ], $record->convertToArray());
         $this->assertEquals([4, 5, 6], $record->getJsonData()->toArray());
 
         $list = TestJsonNotCamel::query()->where('id', '=', $id)->select()->getArray();
         $this->assertEquals([[
-            'id'        => $id,
-            'json_data' => [4, 5, 6],
+            'id'         => $id,
+            'json_data'  => [4, 5, 6],
+            'jsonb_data' => null,
         ]], TestJson::convertListToArray($list));
 
         $record = TestJsonNotCamel::query()->where('id', '=', $id)->select()->get();
         $this->assertEquals([
-            'id'        => $id,
-            'json_data' => [4, 5, 6],
+            'id'         => $id,
+            'json_data'  => [4, 5, 6],
+            'jsonb_data' => null,
         ], $record->convertToArray());
         $this->assertEquals([4, 5, 6], $record->getJsonData()->toArray());
     }

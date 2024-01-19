@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Imi\Pgsql\Db\Drivers\PdoPgsql;
+namespace Imi\Pgsql\Db\Drivers\PDOPgsql;
 
-use Imi\Db\Drivers\TPdoStatement;
+use Imi\Db\Drivers\PDO\TPDOStatement;
 use Imi\Pgsql\Db\Contract\IPgsqlStatement;
 use Imi\Pgsql\Db\PgsqlBaseStatement;
 use Imi\Util\Text;
@@ -16,7 +16,7 @@ use Imi\Util\Text;
  */
 class Statement extends PgsqlBaseStatement implements IPgsqlStatement
 {
-    use TPdoStatement;
+    use TPDOStatement;
 
     /**
      * 更新最后插入ID.
